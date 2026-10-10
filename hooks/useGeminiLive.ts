@@ -95,6 +95,12 @@ export const useGeminiLive = () => {
     setStatus(Status.IDLE);
   }, []);
 
+  const clearHistory = useCallback(() => {
+    setHistory([]);
+    setCurrentCaption(null);
+    currentCaptionRef.current = null;
+  }, []);
+
   const startLiveSession = useCallback(async (
     inputLanguage: string, 
     targetLanguage: string, 
@@ -224,6 +230,7 @@ export const useGeminiLive = () => {
                 // FIX: Cast transcription to include optional speakerId property to handle diarization.
                 const speakerId = (transcription as { speakerId?: number }).speakerId ?? 1;
                 const text = transcription.text;
+                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
                 if (currentCaptionRef.current && currentCaptionRef.current.speakerId === speakerId) {
                     currentCaptionRef.current.text += text;
@@ -231,14 +238,14 @@ export const useGeminiLive = () => {
                     if (currentCaptionRef.current && currentCaptionRef.current.text.trim()) {
                         setHistory(prev => [...prev, currentCaptionRef.current!]);
                     }
-                    currentCaptionRef.current = { speakerId, text };
+                    currentCaptionRef.current = { speakerId, text, timestamp, id: `cap-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` };
                 }
                 setCurrentCaption({ ...currentCaptionRef.current });
             }
 
             if (message.serverContent?.turnComplete) {
               if (currentCaptionRef.current && currentCaptionRef.current.text.trim()) {
-                setHistory(prev => [...prev, currentCaptionRef.current]);
+                setHistory(prev => [...prev, currentCaptionRef.current!]);
               }
               currentCaptionRef.current = null;
               setCurrentCaption(null);
@@ -276,5 +283,5 @@ export const useGeminiLive = () => {
     }
   }, [status, stopLiveSession]);
 
-  return { status, history, currentCaption, start: startLiveSession, stop: stopLiveSession };
+  return { status, history, currentCaption, start: startLiveSession, stop: stopLiveSession, clearHistory };
 };

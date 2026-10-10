@@ -9,4 +9,8 @@ export enum Status {
 export interface Caption {
   speakerId: number;
   text: string;
+  timestamp?: string;
+  id?: string;
 }
+
+export type ExportFormat = 'txt' | 'srt' | 'vtt' | 'json';

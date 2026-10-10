@@ -1,6 +1,6 @@
 {
   "name": "Voice-to-Text Caption Generator",
-  "description": "A real-time speech recognition application that generates captions and subtitles from your microphone input using the Gemini API.",
+  "description": "An Apple-grade real-time speech recognition and subtitle generator featuring multi-speaker diarization, 12+ language translation, and audio DSP noise-gate filters powered by Gemini Live Multimodal AI.",
   "requestFramePermissions": [
     "microphone"
   ]

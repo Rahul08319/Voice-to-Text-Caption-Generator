@@ -1,0 +1,64 @@
+name: Auto-Update & Maintenance Pipeline
+
+on:
+  schedule:
+    # Run every Monday at 00:00 UTC for automated weekly verification & security audits
+    - cron: '0 0 * * 1'
+    # Run on January 1st at 00:00 UTC every year for automatic new-year synchronization
+    - cron: '0 0 1 1 *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maintenance-and-build:
+    name: Automated Maintenance & Freshness Check
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: npm ci || npm install
+
+      - name: 🛡️ Audit Dependencies
+        run: npm audit --audit-level=high || true
+
+      - name: 🏗️ Verify Production Build
+        run: npm run build
+
+      - name: 🔄 Automatic Annual Year Synchronization
+        id: year_sync
+        run: |
+          CURRENT_YEAR=$(date +'%Y')
+          echo "Current Year: $CURRENT_YEAR"
+          # Ensure README copyright is aligned with current year
+          sed -i "s/[0-9]\{4\}–[0-9]\{4\} Voice-to-Text Caption Generator/2025–$CURRENT_YEAR Voice-to-Text Caption Generator/g" README.md || true
+          
+          # Check for changes
+          if git diff --quiet; then
+            echo "changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🚀 Commit & Push Automated Updates
+        if: steps.year_sync.outputs.changes == 'true' && github.event_name == 'schedule'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Automated Maintenance Bot"
+          git commit -am "chore(maintenance): automated annual sync & health check [skip ci]"
+          git push

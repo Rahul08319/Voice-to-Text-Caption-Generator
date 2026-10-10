@@ -1,39 +1,43 @@
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { Controls } from './components/Controls';
 import { CaptionDisplay } from './components/CaptionDisplay';
+import { Icon } from './components/Icon';
 import { useGeminiLive } from './hooks/useGeminiLive';
-import { Status, Caption } from './types';
+import { Status, Caption, ExportFormat } from './types';
 
 const App: React.FC = () => {
-  const { status, history, currentCaption, start, stop } = useGeminiLive();
+  const { status, history, currentCaption, start, stop, clearHistory } = useGeminiLive();
   const [inputLanguage, setInputLanguage] = useState<string>('en-US');
   const [targetLanguage, setTargetLanguage] = useState<string>('none');
   const [silenceTimeout, setSilenceTimeout] = useState<number>(30);
   const [numSpeakers, setNumSpeakers] = useState<number>(1);
   const [volume, setVolume] = useState<number>(0);
   const [noiseReductionLevel, setNoiseReductionLevel] = useState<number>(0.2);
+  const [activeTab, setActiveTab] = useState<'transcribe' | 'settings'>('transcribe');
 
+  // Dynamic automatic year detection for current and upcoming years
+  const currentYear = useMemo(() => new Date().getFullYear(), []);
 
-  const isRecording = useMemo(() => 
-    status === Status.CONNECTING || status === Status.LISTENING, 
+  const isRecording = useMemo(
+    () => status === Status.CONNECTING || status === Status.LISTENING,
     [status]
   );
 
   const statusMessage = useMemo(() => {
     switch (status) {
       case Status.IDLE:
-        return 'Click the microphone to start captioning';
+        return 'Ready to record';
       case Status.CONNECTING:
-        return 'Connecting to Gemini...';
+        return 'Connecting to Gemini Live...';
       case Status.LISTENING:
-        return 'Listening... Speak now!';
+        return 'Listening... Speak now';
       case Status.PROCESSING:
-        return 'Processing...';
+        return 'Synthesizing speech...';
       case Status.ERROR:
-        return 'An error occurred. Please try again.';
+        return 'Connection interrupted. Please retry';
       default:
-        return '';
+        return 'Standby';
     }
   }, [status]);
 
@@ -42,150 +46,363 @@ const App: React.FC = () => {
   }, []);
 
   const handleStart = useCallback(() => {
-    start(inputLanguage, targetLanguage, silenceTimeout, numSpeakers, noiseReductionLevel, handleVolumeChange);
+    start(
+      inputLanguage,
+      targetLanguage,
+      silenceTimeout,
+      numSpeakers,
+      noiseReductionLevel,
+      handleVolumeChange
+    );
   }, [start, inputLanguage, targetLanguage, silenceTimeout, numSpeakers, noiseReductionLevel, handleVolumeChange]);
 
-  const handleDownload = useCallback(() => {
-    const fullText = [...history, currentCaption]
-      .filter((c): c is Caption => c !== null && c.text.trim() !== '')
-      .map(c => `Speaker ${c.speakerId}: ${c.text}`)
-      .join('\n\n');
-      
-    if (!fullText.trim()) return;
+  // Global keyboard shortcuts (Space to toggle, Esc to stop)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is interacting with an input or select
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
 
-    const blob = new Blob([fullText], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'captions.txt';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, [history, currentCaption]);
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (isRecording) {
+          stop();
+        } else {
+          handleStart();
+        }
+      } else if (e.code === 'Escape' && isRecording) {
+        e.preventDefault();
+        stop();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRecording, handleStart, stop]);
+
+  // Multi-format export (TXT, SRT, VTT, JSON)
+  const handleDownload = useCallback(
+    (format: ExportFormat = 'txt') => {
+      const fullCaptions = [...history, currentCaption].filter(
+        (c): c is Caption => c !== null && c.text.trim() !== ''
+      );
+
+      if (fullCaptions.length === 0) return;
+
+      let content = '';
+      let mimeType = 'text/plain';
+      let extension = 'txt';
+
+      if (format === 'txt') {
+        content = fullCaptions
+          .map((c) => `[${c.timestamp || '00:00:00'}] Speaker ${c.speakerId}: ${c.text}`)
+          .join('\n\n');
+        mimeType = 'text/plain';
+        extension = 'txt';
+      } else if (format === 'srt') {
+        content = fullCaptions
+          .map((c, idx) => {
+            const startSec = idx * 4;
+            const endSec = startSec + 3;
+            const formatSrtTime = (s: number) => {
+              const h = Math.floor(s / 3600).toString().padStart(2, '0');
+              const m = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+              const sc = Math.floor(s % 60).toString().padStart(2, '0');
+              return `${h}:${m}:${sc},000`;
+            };
+            return `${idx + 1}\n${formatSrtTime(startSec)} --> ${formatSrtTime(endSec)}\n[Speaker ${c.speakerId}] ${c.text}\n`;
+          })
+          .join('\n');
+        mimeType = 'application/x-subrip';
+        extension = 'srt';
+      } else if (format === 'vtt') {
+        content =
+          'WEBVTT\n\n' +
+          fullCaptions
+            .map((c, idx) => {
+              const startSec = idx * 4;
+              const endSec = startSec + 3;
+              const formatVttTime = (s: number) => {
+                const m = Math.floor(s / 60).toString().padStart(2, '0');
+                const sc = Math.floor(s % 60).toString().padStart(2, '0');
+                return `00:${m}:${sc}.000`;
+              };
+              return `${idx + 1}\n${formatVttTime(startSec)} --> ${formatVttTime(endSec)}\n<v Speaker ${c.speakerId}>${c.text}\n`;
+            })
+            .join('\n');
+        mimeType = 'text/vtt';
+        extension = 'vtt';
+      } else if (format === 'json') {
+        content = JSON.stringify(
+          {
+            generator: 'Voice-to-Text Caption Generator (Apple Edition)',
+            exportedAt: new Date().toISOString(),
+            language: inputLanguage,
+            translation: targetLanguage,
+            utteranceCount: fullCaptions.length,
+            captions: fullCaptions,
+          },
+          null,
+          2
+        );
+        mimeType = 'application/json';
+        extension = 'json';
+      }
+
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `captions-${new Date().toISOString().slice(0, 10)}.${extension}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    [history, currentCaption, inputLanguage, targetLanguage]
+  );
 
   return (
-    <div className="bg-gray-900 text-white min-h-screen flex flex-col font-sans">
-      <Header />
-      <main className="flex-grow flex flex-col container mx-auto p-4 md:p-6 lg:p-8 max-w-4xl">
-        <div className="bg-gray-800 rounded-lg shadow-2xl flex-grow flex flex-col overflow-hidden">
-          <CaptionDisplay 
-            history={history} 
-            currentCaption={currentCaption}
-            onDownload={handleDownload}
-          />
-          <div className="p-6 border-t border-gray-700">
-            <div className="flex justify-center items-start flex-wrap gap-4 w-full mb-6">
-              <div className="flex flex-col items-center space-y-2">
-                <label htmlFor="input-language-select" className="text-gray-400">
-                  Speak in:
-                </label>
-                <select
-                  id="input-language-select"
-                  value={inputLanguage}
-                  onChange={(e) => setInputLanguage(e.target.value)}
-                  disabled={isRecording}
-                  className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full max-w-xs p-2.5 transition-colors"
-                  aria-label="Select input language for transcription"
-                >
-                  <option value="en-US">English (US)</option>
-                  <option value="es-ES">Spanish</option>
-                  <option value="fr-FR">French</option>
-                  <option value="de-DE">German</option>
-                  <option value="it-IT">Italian</option>
-                  <option value="pt-BR">Portuguese (Brazil)</option>
-                  <option value="ja-JP">Japanese</option>
-                  <option value="ko-KR">Korean</option>
-                  <option value="zh-CN">Mandarin Chinese</option>
-                  <option value="hi-IN">Hindi</option>
-                  <option value="ru-RU">Russian</option>
-                  <option value="ar-SA">Arabic</option>
-                </select>
+    <div className="min-h-screen flex flex-col font-sans selection:bg-cyan-500/20 selection:text-cyan-200">
+      {/* Apple Studio Header */}
+      <Header currentYear={currentYear} />
+
+      {/* Main Workspace */}
+      <main className="flex-grow flex flex-col container mx-auto px-4 pb-8 max-w-4xl">
+        {/* Main Apple Liquid Glass Console */}
+        <div className="apple-glass rounded-3xl flex-grow flex flex-col overflow-hidden relative border border-white/[0.09]">
+          {/* Navigation Segment Tabs */}
+          <div className="px-6 pt-4 pb-2 border-b border-white/[0.06] flex items-center justify-between">
+            <div className="inline-flex rounded-xl bg-white/[0.05] p-1 border border-white/10">
+              <button
+                onClick={() => setActiveTab('transcribe')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 flex items-center space-x-1.5 ${
+                  activeTab === 'transcribe'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 shadow-sm'
+                    : 'text-white/50 hover:text-white/80'
+                }`}
+              >
+                <Icon.Waveform className="w-3.5 h-3.5" />
+                <span>Live Studio</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 flex items-center space-x-1.5 ${
+                  activeTab === 'settings'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 shadow-sm'
+                    : 'text-white/50 hover:text-white/80'
+                }`}
+              >
+                <Icon.Sliders className="w-3.5 h-3.5" />
+                <span>Audio Engine Settings</span>
+              </button>
+            </div>
+
+            {/* Live Model Badge */}
+            <div className="hidden sm:flex items-center space-x-1 text-xs text-white/40">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span>Gemini 2.5 Audio Ready</span>
+            </div>
+          </div>
+
+          {/* Tab 1: Live Studio Transcriber */}
+          {activeTab === 'transcribe' && (
+            <div className="flex-grow flex flex-col min-h-[320px]">
+              <CaptionDisplay
+                history={history}
+                currentCaption={currentCaption}
+                onDownload={handleDownload}
+                onClear={clearHistory}
+                isRecording={isRecording}
+              />
+            </div>
+          )}
+
+          {/* Tab 2: Settings Configuration Panel */}
+          {activeTab === 'settings' && (
+            <div className="flex-grow p-6 space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-white/50 mb-1">
+                  Audio & Recognition Configuration
+                </h3>
+                <p className="text-xs text-white/40">
+                  Tune language models, speaker diarization, and DSP noise-gate filters.
+                </p>
               </div>
-              <div className="flex flex-col items-center space-y-2">
-                <label htmlFor="target-language-select" className="text-gray-400">
-                  Translate to:
-                </label>
-                <select
-                  id="target-language-select"
-                  value={targetLanguage}
-                  onChange={(e) => setTargetLanguage(e.target.value)}
-                  disabled={isRecording}
-                  className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full max-w-xs p-2.5 transition-colors"
-                  aria-label="Select target language for translation"
-                >
-                  <option value="none">Original Language</option>
-                  <option value="English">English</option>
-                  <option value="Spanish">Spanish</option>
-                  <option value="French">French</option>
-                  <option value="German">German</option>
-                  <option value="Japanese">Japanese</option>
-                  <option value="Mandarin Chinese">Mandarin Chinese</option>
-                  <option value="Russian">Russian</option>
-                  <option value="Korean">Korean</option>
-                  <option value="Italian">Italian</option>
-                </select>
-              </div>
-              <div className="flex flex-col items-center space-y-2">
-                <label htmlFor="num-speakers-select" className="text-gray-400">
-                  Speakers:
-                </label>
-                <select
-                  id="num-speakers-select"
-                  value={numSpeakers}
-                  onChange={(e) => setNumSpeakers(Number(e.target.value))}
-                  disabled={isRecording}
-                  className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full max-w-xs p-2.5 transition-colors"
-                  aria-label="Select number of speakers"
-                >
-                  <option value="1">1 (Diarization OFF)</option>
-                  <option value="2">2 Speakers</option>
-                  <option value="3">3 Speakers</option>
-                  <option value="4">4 Speakers</option>
-                  <option value="5">5 Speakers</option>
-                </select>
-              </div>
-              <div className="flex flex-col items-center space-y-2">
-                <label htmlFor="silence-timeout-select" className="text-gray-400">
-                  Auto-stop after:
-                </label>
-                <select
-                  id="silence-timeout-select"
-                  value={silenceTimeout}
-                  onChange={(e) => setSilenceTimeout(Number(e.target.value))}
-                  disabled={isRecording}
-                  className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full max-w-xs p-2.5 transition-colors"
-                  aria-label="Select silence duration for auto-stop"
-                >
-                  <option value="15">15s of silence</option>
-                  <option value="30">30s of silence</option>
-                  <option value="60">1 minute of silence</option>
-                  <option value="0">Disabled</option>
-                </select>
-              </div>
-               <div className="flex flex-col items-center space-y-2 w-full max-w-xs">
-                <label htmlFor="noise-reduction-slider" className="text-gray-400">
-                  Noise Reduction
-                </label>
-                <div className="flex items-center space-x-3 w-full">
-                  <span className="text-xs text-gray-500">Off</span>
-                  <input
-                    id="noise-reduction-slider"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={noiseReductionLevel}
-                    onChange={(e) => setNoiseReductionLevel(Number(e.target.value))}
+
+              {/* Apple Bento Grid for Settings */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Spoken Language Picker */}
+                <div className="p-4 rounded-2xl apple-glass-card space-y-2">
+                  <div className="flex items-center space-x-2 text-cyan-400">
+                    <Icon.Globe className="w-4 h-4" />
+                    <label htmlFor="input-language-select" className="text-xs font-semibold text-white/90">
+                      Spoken Input Language
+                    </label>
+                  </div>
+                  <select
+                    id="input-language-select"
+                    value={inputLanguage}
+                    onChange={(e) => setInputLanguage(e.target.value)}
                     disabled={isRecording}
-                    className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    aria-label="Adjust noise reduction level"
-                  />
-                  <span className="text-xs text-gray-500">Max</span>
+                    className="w-full bg-white/[0.05] border border-white/10 text-white text-xs rounded-xl p-2.5 focus:ring-2 focus:ring-cyan-400/40 focus:outline-none transition-colors"
+                  >
+                    <option value="en-US">English (US)</option>
+                    <option value="es-ES">Spanish (Español)</option>
+                    <option value="fr-FR">French (Français)</option>
+                    <option value="de-DE">German (Deutsch)</option>
+                    <option value="it-IT">Italian (Italiano)</option>
+                    <option value="pt-BR">Portuguese (Português - Brasil)</option>
+                    <option value="ja-JP">Japanese (日本語)</option>
+                    <option value="ko-KR">Korean (한국어)</option>
+                    <option value="zh-CN">Mandarin Chinese (简体中文)</option>
+                    <option value="hi-IN">Hindi (हिन्दी)</option>
+                    <option value="ru-RU">Russian (Русский)</option>
+                    <option value="ar-SA">Arabic (العربية)</option>
+                  </select>
+                </div>
+
+                {/* Target Translation Language */}
+                <div className="p-4 rounded-2xl apple-glass-card space-y-2">
+                  <div className="flex items-center space-x-2 text-indigo-400">
+                    <Icon.Sparkles className="w-4 h-4" />
+                    <label htmlFor="target-language-select" className="text-xs font-semibold text-white/90">
+                      Real-time Translation Target
+                    </label>
+                  </div>
+                  <select
+                    id="target-language-select"
+                    value={targetLanguage}
+                    onChange={(e) => setTargetLanguage(e.target.value)}
+                    disabled={isRecording}
+                    className="w-full bg-white/[0.05] border border-white/10 text-white text-xs rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-400/40 focus:outline-none transition-colors"
+                  >
+                    <option value="none">Original Language (No Translation)</option>
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish (Español)</option>
+                    <option value="French">French (Français)</option>
+                    <option value="German">German (Deutsch)</option>
+                    <option value="Japanese">Japanese (日本語)</option>
+                    <option value="Mandarin Chinese">Mandarin Chinese (中文)</option>
+                    <option value="Russian">Russian (Русский)</option>
+                    <option value="Korean">Korean (한국어)</option>
+                    <option value="Italian">Italian (Italiano)</option>
+                  </select>
+                </div>
+
+                {/* Speaker Diarization */}
+                <div className="p-4 rounded-2xl apple-glass-card space-y-2">
+                  <div className="flex items-center space-x-2 text-emerald-400">
+                    <Icon.Users className="w-4 h-4" />
+                    <label htmlFor="num-speakers-select" className="text-xs font-semibold text-white/90">
+                      Speaker Separation (Diarization)
+                    </label>
+                  </div>
+                  <select
+                    id="num-speakers-select"
+                    value={numSpeakers}
+                    onChange={(e) => setNumSpeakers(Number(e.target.value))}
+                    disabled={isRecording}
+                    className="w-full bg-white/[0.05] border border-white/10 text-white text-xs rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-400/40 focus:outline-none transition-colors"
+                  >
+                    <option value="1">1 Speaker (Single Mic)</option>
+                    <option value="2">2 Distinct Speakers</option>
+                    <option value="3">3 Distinct Speakers</option>
+                    <option value="4">4 Distinct Speakers</option>
+                    <option value="5">5 Distinct Speakers</option>
+                  </select>
+                </div>
+
+                {/* Auto-Stop Silence Threshold */}
+                <div className="p-4 rounded-2xl apple-glass-card space-y-2">
+                  <div className="flex items-center space-x-2 text-amber-400">
+                    <Icon.Clock className="w-4 h-4" />
+                    <label htmlFor="silence-timeout-select" className="text-xs font-semibold text-white/90">
+                      Auto-Stop on Silence
+                    </label>
+                  </div>
+                  <select
+                    id="silence-timeout-select"
+                    value={silenceTimeout}
+                    onChange={(e) => setSilenceTimeout(Number(e.target.value))}
+                    disabled={isRecording}
+                    className="w-full bg-white/[0.05] border border-white/10 text-white text-xs rounded-xl p-2.5 focus:ring-2 focus:ring-amber-400/40 focus:outline-none transition-colors"
+                  >
+                    <option value="15">15 seconds of silence</option>
+                    <option value="30">30 seconds of silence (Recommended)</option>
+                    <option value="60">1 minute of silence</option>
+                    <option value="0">Continuous (Never auto-stop)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Noise Gate Level */}
+              <div className="p-4 rounded-2xl apple-glass-card space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-cyan-400">
+                    <Icon.Sliders className="w-4 h-4" />
+                    <label htmlFor="noise-reduction-slider" className="text-xs font-semibold text-white/90">
+                      DSP Noise Reduction Gate
+                    </label>
+                  </div>
+                  <span className="text-xs font-mono text-cyan-300">
+                    {Math.round(noiseReductionLevel * 100)}%
+                  </span>
+                </div>
+                <input
+                  id="noise-reduction-slider"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={noiseReductionLevel}
+                  onChange={(e) => setNoiseReductionLevel(Number(e.target.value))}
+                  disabled={isRecording}
+                  className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-400 disabled:opacity-50"
+                />
+                <div className="flex justify-between text-[11px] text-white/40">
+                  <span>Raw Audio (0%)</span>
+                  <span>Balanced (20%)</span>
+                  <span>Aggressive Gate (100%)</span>
                 </div>
               </div>
             </div>
-            <Controls 
+          )}
+
+          {/* Bottom Controls Bar */}
+          <div className="p-6 border-t border-white/[0.08] bg-white/[0.02] flex flex-col items-center">
+            {/* Quick settings row when in transcribe tab */}
+            {activeTab === 'transcribe' && (
+              <div className="w-full flex items-center justify-center flex-wrap gap-3 mb-5 text-xs text-white/70">
+                <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-white/[0.04] border border-white/10">
+                  <span className="text-white/40">Input:</span>
+                  <span className="text-white/90 font-medium">
+                    {inputLanguage.split('-')[0].toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-white/[0.04] border border-white/10">
+                  <span className="text-white/40">Translation:</span>
+                  <span className="text-white/90 font-medium">
+                    {targetLanguage === 'none' ? 'Off' : targetLanguage}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-white/[0.04] border border-white/10">
+                  <span className="text-white/40">Speakers:</span>
+                  <span className="text-white/90 font-medium">
+                    {numSpeakers === 1 ? 'Single' : `${numSpeakers} Diarized`}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setActiveTab('settings')}
+                  className="text-cyan-400 hover:text-cyan-300 text-xs underline underline-offset-2 ml-1"
+                >
+                  Configure →
+                </button>
+              </div>
+            )}
+
+            <Controls
               isRecording={isRecording}
               onStart={handleStart}
               onStop={stop}
@@ -194,6 +411,20 @@ const App: React.FC = () => {
             />
           </div>
         </div>
+
+        {/* Apple Style Footer with Dynamic Auto-Update Logic */}
+        <footer className="mt-8 text-center text-xs text-white/40 space-y-2">
+          <p className="flex items-center justify-center space-x-2">
+            <span>Voice-to-Text Caption Generator</span>
+            <span>•</span>
+            <span>Crafted with Apple HIG &amp; Liquid Glass Aesthetics</span>
+            <span>•</span>
+            <span className="font-mono text-cyan-400/80">© 2025–{currentYear}</span>
+          </p>
+          <p className="text-[11px] text-white/30">
+            Automated maintenance pipeline enabled • Real-time Multimodal WebSockets stream with Gemini 2.5
+          </p>
+        </footer>
       </main>
     </div>
   );

@@ -1,13 +1,164 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark scroll-smooth">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Voice-to-Text Caption Generator</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300c7be' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='9' y='2' width='6' height='11' rx='3'/><path d='M5 10a7 7 0 0 0 14 0'/><line x1='8' y1='21' x2='16' y2='21'/><line x1='12' y1='17' x2='12' y2='21'/></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#07080a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="Apple-grade real-time voice caption and subtitle generator powered by Gemini Live Multimodal AI." />
+    <title>Voice-to-Text Caption Generator — Apple Studio</title>
+
+    <!-- Google Fonts: Inter & JetBrains Mono for Cupertino-style precision -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
     <script src="https://cdn.tailwindcss.com"></script>
-  <script type="importmap">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: [
+                '-apple-system',
+                'BlinkMacSystemFont',
+                '"SF Pro Display"',
+                '"SF Pro Text"',
+                'Inter',
+                'system-ui',
+                'sans-serif'
+              ],
+              mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+            },
+            colors: {
+              apple: {
+                bg: '#07080a',
+                surface: '#0f121a',
+                elevated: '#171c26',
+                border: 'rgba(255, 255, 255, 0.08)',
+                blue: '#0A84FF',
+                cyan: '#00C7BE',
+                indigo: '#5E5CE6',
+                purple: '#BF5AF2',
+                pink: '#FF375F',
+                emerald: '#30D158',
+                amber: '#FF9F0A',
+                orange: '#FF6482',
+              }
+            },
+            animation: {
+              'sound-wave': 'soundWave 1.2s ease-in-out infinite',
+              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'shimmer': 'shimmer 2.5s linear infinite',
+              'float': 'float 6s ease-in-out infinite',
+            },
+            keyframes: {
+              soundWave: {
+                '0%, 100%': { transform: 'scaleY(0.2)' },
+                '50%': { transform: 'scaleY(1)' },
+              },
+              shimmer: {
+                '0%': { transform: 'translateX(-100%)' },
+                '100%': { transform: 'translateX(100%)' },
+              },
+              float: {
+                '0%, 100%': { transform: 'translateY(0px)' },
+                '50%': { transform: 'translateY(-6px)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Apple Liquid Glass styles & custom tokens */
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        background-color: #07080a;
+        background-image: 
+          radial-gradient(circle at 50% 0%, rgba(10, 132, 255, 0.09) 0%, transparent 50%),
+          radial-gradient(circle at 10% 25%, rgba(0, 199, 190, 0.05) 0%, transparent 40%),
+          radial-gradient(circle at 90% 75%, rgba(191, 90, 242, 0.05) 0%, transparent 40%);
+        background-attachment: fixed;
+        font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      /* Apple Liquid Glass container */
+      .apple-glass {
+        background: rgba(18, 22, 33, 0.72);
+        backdrop-filter: blur(28px) saturate(190%);
+        -webkit-backdrop-filter: blur(28px) saturate(190%);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        box-shadow: 
+          0 24px 60px -12px rgba(0, 0, 0, 0.6),
+          0 0 0 1px rgba(255, 255, 255, 0.04),
+          inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      }
+
+      .apple-glass-pill {
+        background: rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 4px 16px rgba(0, 0, 0, 0.25);
+      }
+
+      .apple-glass-card {
+        background: rgba(25, 30, 44, 0.55);
+        backdrop-filter: blur(20px) saturate(160%);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        box-shadow: 
+          0 10px 25px -5px rgba(0, 0, 0, 0.4),
+          inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+
+      /* Specular rim lighting */
+      .apple-specular-edge {
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      }
+
+      /* Custom Cupertino Scrollbar */
+      ::-webkit-scrollbar {
+        width: 7px;
+        height: 7px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 9999px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.32);
+      }
+
+      /* Accessibility fallbacks */
+      @media (prefers-reduced-transparency: reduce) {
+        .apple-glass, .apple-glass-pill, .apple-glass-card {
+          backdrop-filter: none !important;
+          -webkit-backdrop-filter: none !important;
+          background: #131722 !important;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, ::before, ::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+    <script type="importmap">
 {
   "imports": {
     "react": "https://aistudiocdn.com/react@^19.2.0",
@@ -17,8 +168,8 @@
   }
 }
 </script>
-</head>
-  <body class="bg-gray-900">
+  </head>
+  <body class="text-white selection:bg-cyan-500/30 selection:text-cyan-200 antialiased min-h-screen">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
