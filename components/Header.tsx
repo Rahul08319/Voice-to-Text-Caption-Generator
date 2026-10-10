@@ -3,9 +3,15 @@ import { Icon } from './Icon';
 
 interface HeaderProps {
   currentYear?: number;
+  hasApiKey?: boolean;
+  onOpenApiKeyModal?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentYear = new Date().getFullYear() }) => {
+export const Header: React.FC<HeaderProps> = ({
+  currentYear = new Date().getFullYear(),
+  hasApiKey = false,
+  onOpenApiKeyModal,
+}) => {
   return (
     <header className="w-full pt-6 pb-4 px-4">
       {/* Floating Dynamic Island / Apple Navigation Bar */}
@@ -28,8 +34,24 @@ export const Header: React.FC<HeaderProps> = ({ currentYear = new Date().getFull
           {/* Engine indicator */}
           <div className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-cyan-950/40 border border-cyan-500/20 text-[11px] text-cyan-300">
             <Icon.Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-            <span>Gemini Live Multimodal</span>
+            <span>Gemini Live 2.5</span>
           </div>
+
+          {/* API Key Status Pill */}
+          {onOpenApiKeyModal && (
+            <button
+              onClick={onOpenApiKeyModal}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 text-[11px] rounded-full border transition-all duration-200 ${
+                hasApiKey
+                  ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300 hover:bg-emerald-900/40'
+                  : 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/50 animate-pulse'
+              }`}
+              title={hasApiKey ? 'Gemini API Key active (click to change)' : 'Click to configure Gemini API Key'}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${hasApiKey ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              <span>{hasApiKey ? 'API Key Active' : 'Set API Key'}</span>
+            </button>
+          )}
 
           {/* Auto-updating year badge */}
           <span className="px-2.5 py-1 text-[11px] font-mono rounded-full bg-white/5 border border-white/10 text-white/60">

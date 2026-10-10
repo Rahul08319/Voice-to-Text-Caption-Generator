@@ -7,12 +7,26 @@ import {
 import { Status, Caption } from '../types';
 import { createPcmBlob } from '../utils/audioUtils';
 
-// Initialize the Google Gemini AI client.
-// As per guidelines, the API key is expected to be in process.env.API_KEY.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+/**
+ * Safely resolves the Gemini API key from parameters, environment, or browser storage.
+ * Does NOT throw if missing, preventing app crashes on initial load.
+ */
+export const resolveApiKey = (customKey?: string): string => {
+  if (customKey && customKey.trim()) return customKey.trim();
+  const envKey = (process.env as any)?.API_KEY || (process.env as any)?.GEMINI_API_KEY;
+  if (typeof envKey === 'string' && envKey.trim() && envKey !== 'undefined') {
+    return envKey.trim();
+  }
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('gemini_api_key');
+    if (saved && saved.trim()) return saved.trim();
+  }
+  return '';
+};
 
 export const useGeminiLive = () => {
   const [status, setStatus] = useState<Status>(Status.IDLE);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [history, setHistory] = useState<Caption[]>([]);
   const [currentCaption, setCurrentCaption] = useState<Caption | null>(null);
   
@@ -30,7 +44,6 @@ export const useGeminiLive = () => {
   const noiseGateNodeRef = useRef<GainNode | null>(null);
   const analyserNodeRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-
 
   const stopLiveSession = useCallback(() => {
     // Clear the silence timer and animation frame
@@ -60,7 +73,7 @@ export const useGeminiLive = () => {
       processorNodeRef.current.disconnect();
       processorNodeRef.current = null;
     }
-     if (noiseGateNodeRef.current) {
+    if (noiseGateNodeRef.current) {
       noiseGateNodeRef.current.disconnect();
       noiseGateNodeRef.current = null;
     }
@@ -107,9 +120,19 @@ export const useGeminiLive = () => {
     silenceTimeout: number, 
     numSpeakers: number,
     noiseReductionLevel: number,
-    onVolumeChange: (volume: number) => void
+    onVolumeChange: (volume: number) => void,
+    userApiKey?: string
   ) => {
     if (status !== Status.IDLE) return;
+
+    const apiKey = resolveApiKey(userApiKey);
+    if (!apiKey) {
+      setStatus(Status.ERROR);
+      setErrorMessage('Gemini API key is required. Please configure your API key to start recording.');
+      return;
+    }
+
+    setErrorMessage(null);
     setStatus(Status.CONNECTING);
     onVolumeChange(0); // Reset volume on start
 
@@ -133,6 +156,9 @@ export const useGeminiLive = () => {
     };
 
     try {
+      // Lazy instantiate GoogleGenAI inside start session
+      const ai = new GoogleGenAI({ apiKey });
+
       mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       sessionPromiseRef.current = ai.live.connect({
@@ -218,7 +244,7 @@ export const useGeminiLive = () => {
             peaking.connect(analyser); // Analyser listens to the filtered audio
             analyser.connect(gate); // The gate receives the analyzed audio
             gate.connect(processor); // The processor gets the gated audio
-            processor.connect(destination); // Connect processor to output (for potential monitoring)
+            processor.connect(destination); // Connect processor to output
           },
           onmessage: (message: LiveServerMessage) => {
             const transcription = isTranslating
@@ -227,7 +253,6 @@ export const useGeminiLive = () => {
 
             if (transcription?.text) {
                 resetSilenceTimer();
-                // FIX: Cast transcription to include optional speakerId property to handle diarization.
                 const speakerId = (transcription as { speakerId?: number }).speakerId ?? 1;
                 const text = transcription.text;
                 const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -254,6 +279,7 @@ export const useGeminiLive = () => {
           onerror: (e: ErrorEvent) => {
             console.error('Gemini Live API Error:', e);
             setStatus(Status.ERROR);
+            setErrorMessage('Gemini Live connection error. Please verify your API key and microphone permissions.');
             stopLiveSession();
           },
           onclose: () => {
@@ -276,12 +302,21 @@ export const useGeminiLive = () => {
         },
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to start recording:', error);
       setStatus(Status.ERROR);
+      setErrorMessage(error?.message || 'Failed to initialize recording session.');
       stopLiveSession();
     }
   }, [status, stopLiveSession]);
 
-  return { status, history, currentCaption, start: startLiveSession, stop: stopLiveSession, clearHistory };
+  return { 
+    status, 
+    errorMessage,
+    history, 
+    currentCaption, 
+    start: startLiveSession, 
+    stop: stopLiveSession, 
+    clearHistory 
+  };
 };
